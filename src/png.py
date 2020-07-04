@@ -1,118 +1,138 @@
 import zlib
 
-PNG_HEAD = 8
-IHDR_HEAD = 12
-IHDR_WIDTH = 16
-IHDR_HEGIHT = 20
-IHDR_BITDEPTH = 24
-IHDR_COLORTYPE = 25
-IHDR_COMPTYPE = 26
-IHDR_FILTYPE = 27
-IHDR_INTERLACE = 28
-IHDR_CRC = 29
 
-CHUNK_STEP = 4
+class Buffer:
+    def __init__(self, _bytes=None):
+        if _bytes is None:
+            self.set_bytes(b'')
+        else:
+            self.set_bytes(_bytes)
+
+    def read(self, bytes_num=None):
+        if bytes_num is None:
+            _ = self.__bytes[self.__cursor:]
+            self.begin()
+            return _
+        _ = self.__bytes[self.__cursor:self.__cursor + bytes_num]
+        self.__cursor += bytes_num
+        return _
+
+    def write(self, _bytes, bytes_num=None, byte_order='big'):
+        if bytes_num is None:
+            self.__bytes += _bytes
+        else:
+            self.__bytes += _bytes.to_bytes(bytes_num, byte_order)
+
+    def get_size(self):
+        return len(self.__bytes)
+
+    def set_bytes(self, _bytes):
+        self.__bytes = _bytes
+        self.__cursor = 0
+
+    def begin(self):
+        self.__cursor = 0
 
 
-class PNG:
-    def __init__(self, filepath=None):
-        if filepath is not None:
-            self.DATA = self.read(filepath)
+class Png:
+    def __init__(self, filepath):
+        print("file " + filepath + " Loading...")
+
+        self.ihdr = {
+            'size': (13).to_bytes(4, 'big'),
+            'name': b'IHDR',
+            'width': None,
+            'height': None,
+            'depth': None,
+            'color': None,
+            'comp': None,
+            'fil': None,
+            'interlace': None
+        }
+
+        self.read(filepath)
 
     def read(self, filepath):
-        print("file " + filepath + " Loading...")
-        buf = b''
+        _bytes = b''
         with open(filepath, 'rb') as f:
-            buf = f.read()
+            _bytes = f.read()
             f.close()
-        self.readFromBinary(buf)
+        self.IMG = self.__read_img(Buffer(_bytes))
 
-    def readFromBinary(self, buf):
-        if buf[:PNG_HEAD] != b'\x89PNG\r\n\x1a\n':
+    def __read_img(self, buf):
+        if buf.read(8) != b'\x89PNG\r\n\x1a\n':
             print("This file is not PNG format.")
 
-        self.LENGTH = 13
-
-        if buf[IHDR_HEAD:IHDR_WIDTH] != b'IHDR':
+        buf.read(4)
+        if buf.read(4) != b'IHDR':
             print("Invalid: Not found IHDR chunk")
 
-        self.WIDTH = int.from_bytes(buf[IHDR_WIDTH:IHDR_HEGIHT], 'big')
-        self.HEIGHT = int.from_bytes(buf[IHDR_HEGIHT:IHDR_BITDEPTH], 'big')
-        self.BITDEPTH = int.from_bytes(
-            buf[IHDR_BITDEPTH:IHDR_COLORTYPE], 'big')
-        self.COLORTYPE = int.from_bytes(
-            buf[IHDR_COLORTYPE:IHDR_COMPTYPE], 'big')
-        self.COMPTYPE = int.from_bytes(
-            buf[IHDR_COMPTYPE:IHDR_FILTYPE], 'big')
-        if self.COMPTYPE != 0:
+        self.ihdr['width'] = buf.read(4)
+        self.ihdr['height'] = buf.read(4)
+        self.ihdr['depth'] = buf.read(1)
+        self.ihdr['color'] = buf.read(1)
+        self.ihdr['comp'] = buf.read(1)
+        self.ihdr['fil'] = buf.read(1)
+        self.ihdr['interlace'] = buf.read(1)
+
+        ihdr_bytes = b''.join(
+            [value for (key, value) in self.ihdr.items()][1:])
+        self.ihdr['crc'] = buf.read(4)
+
+        for (key, value) in self.ihdr.items():
+            if key != 'name':
+                self.ihdr[key] = int.from_bytes(value, 'big')
+
+        if self.ihdr['comp'] != 0:
             print("Invalid: Unknown compression method")
-        self.FILTYPE = int.from_bytes(buf[IHDR_FILTYPE:IHDR_INTERLACE], 'big')
-        if self.COMPTYPE != 0:
+        if self.ihdr['fil'] < 0 or self.ihdr['fil'] > 4:
             print("Invalid: Unknown filter method")
-        self.INTERLACE = int.from_bytes(
-            buf[IHDR_INTERLACE:IHDR_CRC], 'big')
-        crcData = int.from_bytes(buf[IHDR_CRC:IHDR_CRC + 4], 'big')
-        crcCalc = zlib.crc32(buf[IHDR_HEAD:IHDR_INTERLACE + 1])
-        if crcData != crcCalc:
-            print("Invalid: This PNG is broken")
-        self.CRC = crcData
+        if zlib.crc32(ihdr_bytes) != self.ihdr['crc']:
+            print("Invalid: CRC dose not match")
 
-        cursor = IHDR_CRC + 4
-        pngData = b''
-        isIDAT = True
-        while (isIDAT):
-            chunkSize = int.from_bytes(buf[cursor:cursor + CHUNK_STEP], 'big')
-            chunkType = buf[cursor + CHUNK_STEP:cursor + CHUNK_STEP * 2]
-            print("chunk type: " + chunkType.decode('utf8'))
+        compressed_img = b''
+        is_chunk = True
+        while (is_chunk):
+            size = int.from_bytes(buf.read(4), 'big')
+            name = buf.read(4)
+            print("chunk: " + name.decode('ascii'))
 
-            if chunkType == b'IEND':
-                isIDAT = False
-            elif chunkType == b'IDAT':
-                pngData += buf[cursor + CHUNK_STEP *
-                               2: cursor + CHUNK_STEP * 2 + chunkSize]
+            if name == b'IEND':
+                is_chunk = False
+            elif name == b'IDAT':
+                img = buf.read(size)
+                if int.from_bytes(buf.read(4), 'big') != zlib.crc32(name + img):
+                    print('Invalid: CRC dose not match')
+                compressed_img += img
+            else:
+                buf.read(size + 4)
 
-            cursor = cursor + chunkSize + CHUNK_STEP * 3
+        decompressed_img = zlib.decompress(compressed_img)
 
-        print(len(pngData))
-
-        decompressed_data = zlib.decompress(pngData)
-        bitsPerPixel = self.__bitsPerPixel(self.COLORTYPE, self.BITDEPTH)
-        bytesPerPixel = int(bitsPerPixel / 8)
-
-        self.COMPDATA = pngData
-
-        self.IMG = self.__applyFilter(
-            decompressed_data, self.WIDTH, self.HEIGHT, bitsPerPixel, bytesPerPixel)
-
-    def info(self):
-        print("width    : " + str(self.WIDTH))
-        print("height   : " + str(self.HEIGHT))
-        print("depth    : " + str(self.BITDEPTH))
-        print("colortype: " + str(self.COLORTYPE))
-        print("interlace: " + str(self.INTERLACE))
-
-    def __bitsPerPixel(self, colortype, depth=None):
-        if colortype == 0:
-            return depth
-        elif colortype == 2:
-            return depth * 3
-        elif colortype == 3:
-            return depth
-        elif colortype == 4:
-            return depth * 2
-        elif colortype == 6:
-            return depth * 4
+        bytes_perpixel = 1
+        if self.ihdr['color'] == 0:
+            pass
+        elif self.ihdr['color'] == 2:
+            bytes_perpixel = 3
+        elif self.ihdr['color'] == 3:
+            pass
+        elif self.ihdr['color'] == 4:
+            bytes_perpixel = 2
+        elif self.ihdr['color'] == 6:
+            bytes_perpixel = 4
         else:
             print("Invalid: Unknown color type.")
 
-    def __applyFilter(self, decompressed_data, width, height, bitsPerPixel, bytesPerPixel):
-        rowSize = int(bytesPerPixel * self.WIDTH + 1)
-        data = [decompressed_data[h * rowSize:h * rowSize + rowSize]
-                for h in range(self.HEIGHT)]
-        data = [[c for c in data[h]] for h in range(self.HEIGHT)]
-        prevRowData = [0]*rowSize
-        for h in range(self.HEIGHT):
-            rowData = data[h]
+        return self.__reconstruction(decompressed_img, bytes_perpixel)
+
+    def __reconstruction(self, decompressed_img, bytes_perpixel):
+        row_size = int(bytes_perpixel * self.ihdr['width'] + 1)
+        img = [decompressed_img[h * row_size:h * row_size + row_size]
+               for h in range(self.ihdr['height'])]
+        img = [[c for c in img[h]] for h in range(self.ihdr['height'])]
+        prevRowData = [0]*row_size
+        for h in range(self.ihdr['height']):
+            rowData = img[h]
             filterType = rowData[0]
 
             currentScanData = rowData[1:]
@@ -121,24 +141,24 @@ class PNG:
             if filterType == 0:
                 continue
             elif filterType == 1:
-                for i in range(bytesPerPixel, len(currentScanData)):
+                for i in range(bytes_perpixel, len(currentScanData)):
                     currentScanData[i] = (
-                        currentScanData[i-bytesPerPixel] + currentScanData[i]) % 256
+                        currentScanData[i-bytes_perpixel] + currentScanData[i]) % 256
             elif filterType == 2:
                 for i in range(0, len(currentScanData)):
                     currentScanData[i] = (
                         prevScanData[i] + currentScanData[i]) % 256
             elif filterType == 3:
-                for i in range(bytesPerPixel):
+                for i in range(bytes_perpixel):
                     currentScanData[i] = (currentScanData[i] +
                                           int(prevScanData[i] / 2)) % 256
-                for i in range(bytesPerPixel, len(currentScanData)):
+                for i in range(bytes_perpixel, len(currentScanData)):
                     _ = int(
-                        (currentScanData[i-bytesPerPixel] + prevScanData[i]) / 2)
+                        (currentScanData[i-bytes_perpixel] + prevScanData[i]) / 2)
                     currentScanData[i] = (_ + currentScanData[i]) % 256
             elif filterType == 4:
                 a, b, c, Pr = 0, 0, 0, 0
-                for i in range(bytesPerPixel):
+                for i in range(bytes_perpixel):
                     b = prevScanData[i]
                     pa = abs(b - c)
                     pb = abs(a - c)
@@ -150,9 +170,9 @@ class PNG:
                     else:
                         Pr = c
                     currentScanData[i] = (currentScanData[i] + Pr) % 256
-                for i in range(bytesPerPixel, len(currentScanData)):
-                    a = currentScanData[i - bytesPerPixel]
-                    c = prevScanData[i - bytesPerPixel]
+                for i in range(bytes_perpixel, len(currentScanData)):
+                    a = currentScanData[i - bytes_perpixel]
+                    c = prevScanData[i - bytes_perpixel]
                     b = prevScanData[i]
                     pa = abs(b - c)
                     pb = abs(a - c)
@@ -165,59 +185,63 @@ class PNG:
                         Pr = c
                     currentScanData[i] = (currentScanData[i] + Pr) % 256
 
-            data[h][1:] = currentScanData
+            img[h][1:] = currentScanData
             prevRowData = rowData
 
-        return data
+        self.width = int(row_size/bytes_perpixel)
+        self.height = len(img)
+        return img
 
     def write(self, filepath):
-        raw = b''
-        raw += b'\x89' + 'PNG\r\n\x1a\n'.encode('ascii')
-        raw += (13).to_bytes(4, 'big')
-        raw += 'IHDR'.encode('ascii')
-        raw += (self.WIDTH).to_bytes(4, 'big')
-        raw += (self.HEIGHT).to_bytes(4, 'big')
-        raw += (self.BITDEPTH).to_bytes(1, 'big')
-        raw += (self.COLORTYPE).to_bytes(1, 'big')
-        raw += (self.COMPTYPE).to_bytes(1, 'big')
-        raw += (self.FILTYPE).to_bytes(1, 'big')
-        raw += (self.INTERLACE).to_bytes(1, 'big')
-        raw += (self.CRC).to_bytes(4, 'big')
-
-        raw += (1).to_bytes(4, 'big')
-        srgb = 'sRGB'.encode('ascii') + (3).to_bytes(1, 'big')
-        raw += srgb + zlib.crc32(srgb).to_bytes(4, 'big')
+        raw = Buffer()
+        raw.write(b'\x89PNG\r\n\x1a\n')
+        raw.write(self.ihdr['size'], 4)
+        raw.write(self.ihdr['name'])
+        raw.write(self.ihdr['width'], 4)
+        raw.write(self.ihdr['height'], 4)
+        raw.write(self.ihdr['depth'], 1)
+        raw.write(self.ihdr['color'], 1)
+        raw.write(self.ihdr['comp'], 1)
+        raw.write(self.ihdr['fil'], 1)
+        raw.write(self.ihdr['interlace'], 1)
+        raw.write(self.ihdr['crc'], 4)
 
         for i in self.IMG:
             i[0] = 0
-        imgRaw = b''.join([(c).to_bytes(1, 'big')
-                           for inner in self.IMG for c in inner])
-        compressedData = zlib.compress(imgRaw)
+        img_raw = b''.join([(c).to_bytes(1, 'big')
+                            for inner in self.IMG for c in inner])
+        compressed_img = zlib.compress(img_raw)
+        raw.write(len(compressed_img), 4)
+        raw.write(b'IDAT')
+        raw.write(compressed_img)
+        raw.write(zlib.crc32(b'IDAT' + compressed_img), 4)
 
-        raw += (len(compressedData)).to_bytes(4, 'big')
-        IDATData = b'IDAT' + compressedData
-        raw += IDATData
-        raw += zlib.crc32(IDATData).to_bytes(4, 'big')
-
-        raw += (0).to_bytes(4, 'big')
-        raw += 'IEND'.encode('ascii')
-        raw += zlib.crc32(b'IEND').to_bytes(4, 'big')
+        raw.write(0, 4)
+        raw.write(b'IEND')
+        raw.write(zlib.crc32(b'IEND'), 4)
 
         with open(filepath, 'wb') as f:
-            f.write(raw)
+            f.write(raw.read())
             f.close()
 
-    def getRGB(self):
+    def info(self):
+        for (key, value) in self.ihdr.items():
+            print(str(key) + ": " + str(value))
+
+    def size(self):
+        return (self.width, self.height)
+
+    def get_rgb(self):
         pass
 
-    def getRGBA(self):
+    def get_rgba(self):
         pass
 
-    def uncompress(self, data):
+    def decompress(self, data):
         pass
 
 
 if __name__ == "__main__":
-    p = PNG("../Assets/lenna.png")
-    #p = PNG("test.png")
-    p.write("test.png")
+    p = Png("../Assets/test.png")
+    # p = Png("test.png")
+    p.write("../Assets/out.png")
