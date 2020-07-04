@@ -193,35 +193,35 @@ class Png:
         return img
 
     def write(self, filepath):
-        raw = Buffer()
-        raw.write(b'\x89PNG\r\n\x1a\n')
-        raw.write(self.ihdr['size'], 4)
-        raw.write(self.ihdr['name'])
-        raw.write(self.ihdr['width'], 4)
-        raw.write(self.ihdr['height'], 4)
-        raw.write(self.ihdr['depth'], 1)
-        raw.write(self.ihdr['color'], 1)
-        raw.write(self.ihdr['comp'], 1)
-        raw.write(self.ihdr['fil'], 1)
-        raw.write(self.ihdr['interlace'], 1)
-        raw.write(self.ihdr['crc'], 4)
+        raw = b''
+        raw += b'\x89PNG\r\n\x1a\n'
+        raw += (self.ihdr['size']).to_bytes(4, 'big')
+        raw += (self.ihdr['name'])
+        raw += (self.ihdr['width']).to_bytes(4, 'big')
+        raw += (self.ihdr['height']).to_bytes(4, 'big')
+        raw += (self.ihdr['depth']).to_bytes(1, 'big')
+        raw += (self.ihdr['color']).to_bytes(1, 'big')
+        raw += (self.ihdr['comp']).to_bytes(1, 'big')
+        raw += (self.ihdr['fil']).to_bytes(1, 'big')
+        raw += (self.ihdr['interlace']).to_bytes(1, 'big')
+        raw += (self.ihdr['crc']).to_bytes(4, 'big')
 
         for i in self.IMG:
             i[0] = 0
         img_raw = b''.join([(c).to_bytes(1, 'big')
                             for inner in self.IMG for c in inner])
         compressed_img = zlib.compress(img_raw)
-        raw.write(len(compressed_img), 4)
-        raw.write(b'IDAT')
-        raw.write(compressed_img)
-        raw.write(zlib.crc32(b'IDAT' + compressed_img), 4)
+        raw += len(compressed_img).to_bytes(4, 'big')
+        raw += b'IDAT'
+        raw += compressed_img
+        raw += zlib.crc32(b'IDAT' + compressed_img).to_bytes(4, 'big')
 
-        raw.write(0, 4)
-        raw.write(b'IEND')
-        raw.write(zlib.crc32(b'IEND'), 4)
+        raw += (0).to_bytes(4, 'big')
+        raw += b'IEND'
+        raw += zlib.crc32(b'IEND').to_bytes(4, 'big')
 
         with open(filepath, 'wb') as f:
-            f.write(raw.read())
+            f.write(raw)
             f.close()
 
     def info(self):
