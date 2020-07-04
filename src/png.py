@@ -95,7 +95,7 @@ class Png:
         while (is_chunk):
             size = int.from_bytes(buf.read(4), 'big')
             name = buf.read(4)
-            print("chunk: " + name.decode('ascii'))
+            #print("chunk: " + name.decode('ascii'))
 
             if name == b'IEND':
                 is_chunk = False
@@ -127,39 +127,35 @@ class Png:
 
     def __reconstruction(self, decompressed_img, bytes_perpixel):
         row_size = int(bytes_perpixel * self.ihdr['width'] + 1)
-        img = [decompressed_img[h * row_size:h * row_size + row_size]
-               for h in range(self.ihdr['height'])]
-        img = [[c for c in img[h]] for h in range(self.ihdr['height'])]
-        prevRowData = [0]*row_size
+        prev_row = bytearray(b'\x00' * row_size)
+        decompressed_img = bytearray(decompressed_img)
+
         for h in range(self.ihdr['height']):
-            rowData = img[h]
-            filterType = rowData[0]
+            offset = h*row_size
+            row = decompressed_img[offset:offset+row_size]
+            _filter = row[0]
+            current_scan = row[1:]
+            prev_scan = prev_row[1:]
 
-            currentScanData = rowData[1:]
-            prevScanData = prevRowData[1:]
-
-            if filterType == 0:
-                continue
-            elif filterType == 1:
-                for i in range(bytes_perpixel, len(currentScanData)):
-                    currentScanData[i] = (
-                        currentScanData[i-bytes_perpixel] + currentScanData[i]) % 256
-            elif filterType == 2:
-                for i in range(0, len(currentScanData)):
-                    currentScanData[i] = (
-                        prevScanData[i] + currentScanData[i]) % 256
-            elif filterType == 3:
+            if _filter == 1:
+                for i in range(bytes_perpixel, len(current_scan)):
+                    current_scan[i] = (
+                        current_scan[i-bytes_perpixel] + current_scan[i]) % 256
+            elif _filter == 2:
+                for i in range(0, len(current_scan)):
+                    current_scan[i] = (prev_scan[i] + current_scan[i]) % 256
+            elif _filter == 3:
                 for i in range(bytes_perpixel):
-                    currentScanData[i] = (currentScanData[i] +
-                                          int(prevScanData[i] / 2)) % 256
-                for i in range(bytes_perpixel, len(currentScanData)):
+                    current_scan[i] = (
+                        current_scan[i] + int(prev_scan[i] / 2)) % 256
+                for i in range(bytes_perpixel, len(current_scan)):
                     _ = int(
-                        (currentScanData[i-bytes_perpixel] + prevScanData[i]) / 2)
-                    currentScanData[i] = (_ + currentScanData[i]) % 256
-            elif filterType == 4:
+                        (current_scan[i-bytes_perpixel] + prev_scan[i]) / 2)
+                    current_scan[i] = (_ + current_scan[i]) % 256
+            elif _filter == 4:
                 a, b, c, Pr = 0, 0, 0, 0
                 for i in range(bytes_perpixel):
-                    b = prevScanData[i]
+                    b = prev_scan[i]
                     pa = abs(b - c)
                     pb = abs(a - c)
                     pc = abs(a + b - 2 * c)
@@ -169,11 +165,11 @@ class Png:
                         Pr = b
                     else:
                         Pr = c
-                    currentScanData[i] = (currentScanData[i] + Pr) % 256
-                for i in range(bytes_perpixel, len(currentScanData)):
-                    a = currentScanData[i - bytes_perpixel]
-                    c = prevScanData[i - bytes_perpixel]
-                    b = prevScanData[i]
+                    current_scan[i] = (current_scan[i] + Pr) % 256
+                for i in range(bytes_perpixel, len(current_scan)):
+                    a = current_scan[i - bytes_perpixel]
+                    c = prev_scan[i - bytes_perpixel]
+                    b = prev_scan[i]
                     pa = abs(b - c)
                     pb = abs(a - c)
                     pc = abs(a + b - 2 * c)
@@ -183,14 +179,12 @@ class Png:
                         Pr = b
                     else:
                         Pr = c
-                    currentScanData[i] = (currentScanData[i] + Pr) % 256
+                    current_scan[i] = (current_scan[i] + Pr) % 256
 
-            img[h][1:] = currentScanData
-            prevRowData = rowData
-
-        self.width = int(row_size/bytes_perpixel)
-        self.height = len(img)
-        return img
+            decompressed_img[offset:offset + row_size] = _filter.to_bytes(
+                1, 'big') + current_scan
+            prev_row = _filter.to_bytes(1, 'big') + current_scan
+        return decompressed_img
 
     def write(self, filepath):
         raw = b''
@@ -206,11 +200,10 @@ class Png:
         raw += (self.ihdr['interlace']).to_bytes(1, 'big')
         raw += (self.ihdr['crc']).to_bytes(4, 'big')
 
-        for i in self.IMG:
-            i[0] = 0
-        img_raw = b''.join([(c).to_bytes(1, 'big')
-                            for inner in self.IMG for c in inner])
-        compressed_img = zlib.compress(img_raw)
+        row_size = int(len(self.IMG) / self.ihdr['height'])
+        for i in range(self.ihdr['height']):
+            self.IMG[i*row_size] = 0
+        compressed_img = zlib.compress(self.IMG)
         raw += len(compressed_img).to_bytes(4, 'big')
         raw += b'IDAT'
         raw += compressed_img
@@ -242,6 +235,5 @@ class Png:
 
 
 if __name__ == "__main__":
-    p = Png("../Assets/test.png")
-    # p = Png("test.png")
+    p = Png("../Assets/lenna.png")
     p.write("../Assets/out.png")
