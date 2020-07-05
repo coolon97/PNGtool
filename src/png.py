@@ -184,6 +184,7 @@ class Png:
             decompressed_img[offset:offset + row_size] = _filter.to_bytes(
                 1, 'big') + current_scan
             prev_row = _filter.to_bytes(1, 'big') + current_scan
+
         return decompressed_img
 
     def write(self, filepath):
