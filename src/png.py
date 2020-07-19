@@ -217,13 +217,59 @@ class Png:
         with open(filepath, 'wb') as f:
             f.write(raw)
             f.close()
+    
+    def write_binary(self, img, width, height):
+        import numpy as np
+        ihdr = {
+            'size': (13).to_bytes(4, 'big'),
+            'name': b'IHDR',
+            'width': width,
+            'height': height,
+            'depth': 8,
+            'color': 2,
+            'comp': 0,
+            'fil': 0,
+            'interlace': 0
+        }
+
+        img = np.ravel(img)
+
+        raw = b''
+        raw += b'\x89PNG\r\n\x1a\n'
+        raw += (ihdr['size']).to_bytes(4, 'big')
+        raw += (ihdr['name'])
+        raw += (ihdr['width']).to_bytes(4, 'big')
+        raw += (ihdr['height']).to_bytes(4, 'big')
+        raw += (ihdr['depth']).to_bytes(1, 'big')
+        raw += (ihdr['color']).to_bytes(1, 'big')
+        raw += (ihdr['comp']).to_bytes(1, 'big')
+        raw += (ihdr['fil']).to_bytes(1, 'big')
+        raw += (ihdr['interlace']).to_bytes(1, 'big')
+        raw += (ihdr['crc']).to_bytes(4, 'big')
+
+        row_size = int(len(img) / self.ihdr['height'])
+        for i in range(self.ihdr['height']):
+            img[i*row_size] = 0
+        compressed_img = zlib.compress(img)
+        raw += len(compressed_img).to_bytes(4, 'big')
+        raw += b'IDAT'
+        raw += compressed_img
+        raw += zlib.crc32(b'IDAT' + compressed_img).to_bytes(4, 'big')
+
+        raw += (0).to_bytes(4, 'big')
+        raw += b'IEND'
+        raw += zlib.crc32(b'IEND').to_bytes(4, 'big')
+
+        with open("png_b.png", 'wb') as f:
+            f.write(raw)
+            f.close()
 
     def info(self):
         for (key, value) in self.ihdr.items():
             print(str(key) + ": " + str(value))
 
     def size(self):
-        return (self.width, self.height)
+        return (self.ihdr["width"], self.ihdr["height"])
 
     def get_rgb(self):
         pass
