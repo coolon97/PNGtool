@@ -237,15 +237,11 @@ class Png:
         raw = b''
         raw += b'\x89PNG\r\n\x1a\n'
         raw += (ihdr['size']).to_bytes(4, 'big')
-        raw += (ihdr['name'])
-        raw += (ihdr['width']).to_bytes(4, 'big')
-        raw += (ihdr['height']).to_bytes(4, 'big')
-        raw += (ihdr['depth']).to_bytes(1, 'big')
-        raw += (ihdr['color']).to_bytes(1, 'big')
-        raw += (ihdr['comp']).to_bytes(1, 'big')
-        raw += (ihdr['fil']).to_bytes(1, 'big')
-        raw += (ihdr['interlace']).to_bytes(1, 'big')
-        raw += (ihdr['crc']).to_bytes(4, 'big')
+        head = (ihdr['name']) + (ihdr['width']).to_bytes(4, 'big') + (ihdr['height']).to_bytes(4, 'big')\
+                + (ihdr['depth']).to_bytes(1, 'big') + (ihdr['color']).to_bytes(1, 'big') + (ihdr['comp']).to_bytes(1, 'big')\
+                + (ihdr['interlace']).to_bytes(1, 'big') + (ihdr['interlace']).to_bytes(1, 'big')
+        raw += head
+        raw += zlib.crc32(head).to_bytes(4, 'big')
 
         row_size = int(len(img) / self.ihdr['height'])
         for i in range(self.ihdr['height']):
